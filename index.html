@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8fafc">
+  <title>Inventory &amp; Dues Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    input { color-scheme: light; }
+    .soft-shadow { box-shadow: 0 14px 40px rgba(15, 23, 42, .06); }
+    .table-scroll { scrollbar-color: #a5b4fc #f1f5f9; scrollbar-width: thin; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900 antialiased">
+  <main class="mx-auto max-w-7xl px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
+    <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <div class="mb-3 inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold tracking-wide text-indigo-700">
+          <span class="h-2 w-2 rounded-full bg-indigo-500"></span> Inventory Dashboard - ELS BIA
+        </div>
+        <h1 class="text-2xl font-bold tracking-tight text-slate-950 sm:text-4xl">Inventory &amp; dues</h1>
+        <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Look up PL item details and explore monthly PL distribution.</p>
+      </div>
+      <div class="flex items-center gap-2 sm:self-start">
+        <button id="refreshData" type="button" aria-label="Refresh data" title="Refresh data" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-50" disabled>
+          <svg id="refreshIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20 7v5h-5M4 17v-5h5m-4.1-3A8 8 0 0 1 18.3 6L20 12M4 12l1.7 6A8 8 0 0 0 19.1 15" />
+          </svg>
+        </button>
+        <div class="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 sm:text-sm" role="status" aria-live="polite">
+          <span id="statusDot" class="h-2 w-2 shrink-0 rounded-full bg-slate-400"></span>
+          <span id="statusText">Connecting to sheet...</span>
+        </div>
+      </div>
+    </header>
+
+    <div id="errorMessage" class="mb-5 hidden rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert"></div>
+
+    <section class="soft-shadow mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6" aria-labelledby="plWidgetHeading">
+      <div class="mb-5">
+        <h2 id="plWidgetHeading" class="text-lg font-semibold text-slate-950">PL item lookup</h2>
+        <p class="mt-1 text-sm text-slate-500">Search for a PL No to view item details and stock / dues columns.</p>
+      </div>
+      <label class="block max-w-xl">
+        <span class="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">PL No</span>
+        <input id="plSearch" type="text" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" autocomplete="off" placeholder="Enter an 8-digit PL No..." aria-describedby="plSearchHint" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100">
+        <span id="plSearchHint" class="sr-only">Enter exactly 8 digits.</span>
+      </label>
+
+      <div id="plResults" class="mt-6 hidden">
+        <div class="table-scroll overflow-x-auto rounded-xl border border-slate-200">
+          <table class="min-w-full border-collapse text-left text-sm">
+            <thead id="plTableHead" class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600"></thead>
+            <tbody id="plTableBody" class="divide-y divide-slate-100 bg-white"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="plEmpty" class="mt-6 rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+        Enter a PL No above to display matching sheet rows.
+      </div>
+    </section>
+
+    <section class="soft-shadow rounded-2xl border border-slate-200 bg-white p-4 sm:p-6" aria-labelledby="monthWidgetHeading">
+      <div class="mb-5">
+        <h2 id="monthWidgetHeading" class="text-lg font-semibold text-slate-950">Monthly PL distribution</h2>
+        <p class="mt-1 text-sm text-slate-500">The chart always shows months 1–12. Select a slice to view its PL items below.</p>
+      </div>
+      <div class="relative mx-auto mb-6 h-72 max-w-xl sm:h-96">
+        <canvas id="monthChart" aria-label="Clickable pie chart of PL counts by month"></canvas>
+        <div id="chartEmpty" class="absolute inset-0 flex items-center justify-center rounded-xl bg-white/90 px-6 text-center text-sm text-slate-500">
+          Monthly PL counts will appear here when data loads.
+        </div>
+      </div>
+      <p id="monthSummary" class="mb-5 text-center text-xs text-slate-500">Pie labels show month numbers 1–12. Click a slice to view its PL rows.</p>
+
+      <div id="monthDetails" class="hidden">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 id="monthDetailHeading" class="font-semibold text-slate-900">PL details by month</h3>
+            <p id="monthResultCount" class="mt-1 text-sm text-slate-500"></p>
+          </div>
+          <button id="downloadMonth" type="button" disabled class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50">
+            <span aria-hidden="true">↓</span> Download Excel
+          </button>
+        </div>
+        <div class="table-scroll overflow-x-auto rounded-xl border border-slate-200">
+          <table class="min-w-max border-collapse text-left text-sm">
+            <thead id="monthTableHead" class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600"></thead>
+            <tbody id="monthTableBody" class="divide-y divide-slate-100 bg-white"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="mt-8 text-center text-xs text-slate-400">Data is fetched from the configured Google Apps Script web app.</footer>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      // Replace this value with the deployed Apps Script web app URL ending in /exec.
+      var appUrl = "https://script.google.com/macros/s/AKfycbzLq7R8hjB_9xNyxDpEu_MSFmW50RUAaLihcVuYUX4ILEvvkTtPOm0PQDxW86jkc1l2RQ/exec";
+      var records = [];
+      var chart = null;
+      var selectedMonth = "";
+      var plColumns = [
+        ["PL No", ["PL Number", "PLNo"]],
+        ["Item Description", ["Description"]],
+        ["V/S", ["V/S", "V S", "VS"]],
+        ["ABC", ["ABC"]],
+        ["WARD", ["Ward"]],
+        ["Total PAAC 26-27", ["Total PAAC 2026-27", "Total PAAC"]],
+        ["STOCK", ["STOCK", "Stock"]],
+        ["UD S1313 Qty", ["UD S1313 Qty", "UD S1313 Quantity", "UDS1313 Qty"]],
+        ["CONSP", ["CONSP"]],
+        ["DUES-CY", ["DUES-CY", "Dues CY"]],
+        ["DUES-NY", ["DUES-NY", "Dues NY"]],
+        ["uncovered dues demand", ["uncovered dues demand", "Uncovered Dues Demand"]],
+        ["uncovered dues tender", ["uncovered dues tender", "Uncovered Dues Tender"]],
+        ["UNIT", ["Unit"]],
+        ["stock mm pp", ["Stock MM PP"]],
+        ["BAR", ["BAR"]],
+        ["aac value", ["AAC Value", "AAC"]],
+        ["P O details", ["PO details", "P.O. details", "Purchase Order details"]],
+        ["ledger section details", ["Ledger section details"]],
+        ["Ledger section Remarks (26-27)", ["Ledger section Remarks 26-27", "Ledger section Remarks (2026-27)"]]
+      ];
+      var fields = { pl: "", description: "", month: "" };
+      var elements = {
+        statusDot: document.getElementById("statusDot"),
+        statusText: document.getElementById("statusText"),
+        refreshData: document.getElementById("refreshData"),
+        refreshIcon: document.getElementById("refreshIcon"),
+        errorMessage: document.getElementById("errorMessage"),
+        plSearch: document.getElementById("plSearch"),
+        plResults: document.getElementById("plResults"),
+        plEmpty: document.getElementById("plEmpty"),
+        plTableHead: document.getElementById("plTableHead"),
+        plTableBody: document.getElementById("plTableBody"),
+        monthSummary: document.getElementById("monthSummary"),
+        chartEmpty: document.getElementById("chartEmpty"),
+        monthDetails: document.getElementById("monthDetails"),
+        monthDetailHeading: document.getElementById("monthDetailHeading"),
+        monthResultCount: document.getElementById("monthResultCount"),
+        monthTableHead: document.getElementById("monthTableHead"),
+        monthTableBody: document.getElementById("monthTableBody"),
+        downloadMonth: document.getElementById("downloadMonth")
+      };
+
+      function setStatus(text, state) {
+        elements.statusText.textContent = text;
+        elements.statusDot.className = "h-2 w-2 shrink-0 rounded-full " +
+          (state === "success" ? "bg-emerald-500" : state === "error" ? "bg-rose-500" : state === "loading" ? "animate-pulse bg-amber-500" : "bg-slate-400");
+      }
+
+      function showError(message) {
+        elements.errorMessage.textContent = message;
+        elements.errorMessage.classList.remove("hidden");
+      }
+
+      function clearError() {
+        elements.errorMessage.textContent = "";
+        elements.errorMessage.classList.add("hidden");
+      }
+
+      function normalize(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .toLowerCase().replace(/[^a-z0-9]/g, "");
+      }
+
+      function getField(key, aliases) {
+        var wanted = [key].concat(aliases || []).map(normalize);
+        var recordKeys = records.length ? Object.keys(records[0]) : [];
+        for (var i = 0; i < wanted.length; i += 1) {
+          for (var j = 0; j < recordKeys.length; j += 1) {
+            if (normalize(recordKeys[j]) === wanted[i]) return recordKeys[j];
+          }
+        }
+        return "";
+      }
+
+      function getValue(record, key) {
+        return key && record[key] !== null && record[key] !== undefined ? record[key] : "";
+      }
+
+      function displayValue(value) {
+        if (value === null || value === undefined || value === "") return "—";
+        if (value instanceof Date && !isNaN(value.getTime())) return value.toLocaleDateString();
+        return String(value);
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, function (character) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character];
+        });
+      }
+
+      function configureFields() {
+        fields.pl = getField("PL No", ["PL Number", "PLNo"]);
+        fields.description = getField("Item Description", ["Description", "Item Description"]);
+        fields.month = getField("stock mm pp", ["Stock MM PP"]);
+        if (!fields.pl) throw new Error("Could not find the PL No column in the JSON response.");
+        if (!fields.month) throw new Error('Could not find the "stock mm pp" column in the JSON response.');
+
+      }
+
+      function matchingPlRows() {
+        var query = elements.plSearch.value.trim().toLowerCase();
+        if (!/^\d{8}$/.test(query)) return [];
+        return records.filter(function (record) {
+          return String(getValue(record, fields.pl)).toLowerCase().indexOf(query) !== -1;
+        });
+      }
+
+      function renderPlResults() {
+        var query = elements.plSearch.value.trim();
+        var rows = matchingPlRows();
+        if (!/^\d{8}$/.test(query)) {
+          elements.plResults.classList.add("hidden");
+          elements.plEmpty.classList.remove("hidden");
+          elements.plEmpty.textContent = "Enter exactly 8 digits to search by PL No.";
+          return;
+        }
+        if (!rows.length) {
+          elements.plResults.classList.add("hidden");
+          elements.plEmpty.classList.remove("hidden");
+          elements.plEmpty.textContent = "No PL No matches your search.";
+          return;
+        }
+        elements.plResults.classList.remove("hidden");
+        elements.plEmpty.classList.add("hidden");
+        elements.plTableHead.innerHTML = "<tr>" +
+          '<th scope="col" class="whitespace-nowrap px-4 py-3">Field</th>' +
+          '<th scope="col" class="whitespace-nowrap px-4 py-3">Value</th>' +
+          "</tr>";
+        elements.plTableBody.innerHTML = rows.map(function (record, recordIndex) {
+          var recordRows = plColumns.map(function (column) {
+            var key = getField(column[0], column[1]);
+            return '<tr><th scope="row" class="whitespace-nowrap bg-slate-50 px-4 py-3 font-medium text-slate-700">' +
+              escapeHtml(column[0]) + '</th><td class="px-4 py-3 text-slate-700">' +
+              escapeHtml(displayValue(getValue(record, key))) + "</td></tr>";
+          }).join("");
+          return (recordIndex ? '<tr><th colspan="2" class="border-t-2 border-slate-200 bg-slate-100 px-4 py-2 text-left text-xs font-semibold uppercase text-slate-600">Additional matching row</th></tr>' : "") +
+            recordRows;
+        }).join("");
+      }
+
+      function countUniquePlByMonth(sourceRecords) {
+        var counts = {};
+        var seen = {};
+        sourceRecords.forEach(function (record) {
+          var month = monthBucket(getValue(record, fields.month));
+          var pl = String(getValue(record, fields.pl)).trim();
+          if (!month || !pl) return;
+          var key = month + "\u0000" + pl;
+          if (seen[key]) return;
+          seen[key] = true;
+          counts[month] = (counts[month] || 0) + 1;
+        });
+        return counts;
+      }
+
+      function monthRows(month) {
+        var monthNumber = Number(month);
+        if (!monthNumber || monthNumber < 1 || monthNumber > 12) return [];
+        var rows = [];
+        var seen = {};
+        records.forEach(function (record) {
+          if (monthBucket(getValue(record, fields.month)) !== monthNumber) return;
+          var pl = String(getValue(record, fields.pl)).trim();
+          if (!pl || seen[pl]) return;
+          seen[pl] = true;
+          rows.push(record);
+        });
+        return rows;
+      }
+
+      function monthBucket(value) {
+        var text = String(value === null || value === undefined ? "" : value).trim();
+        if (!text) return 0;
+
+        var range = text.match(/^(-?\d+(?:\.\d+)?)\s*[-–]\s*(-?\d+(?:\.\d+)?)$/);
+        var numeric = range ? Number(range[2]) : Number(text);
+        if (isFinite(numeric) && (range || /^-?\d+(?:\.\d+)?$/.test(text))) {
+          var bucket = Math.max(1, Math.ceil(numeric));
+          return bucket <= 12 ? bucket : 0;
+        }
+
+        var monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        var nameMatch = text.toLowerCase().match(/^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\b|[-\s])/);
+        if (!nameMatch) return 0;
+        var abbreviation = nameMatch[1].slice(0, 3);
+        return monthNames.indexOf(abbreviation) + 1;
+      }
+
+      function renderMonthDetails(month) {
+        var rows = monthRows(month);
+        elements.monthDetails.classList.toggle("hidden", !month);
+        elements.monthDetailHeading.textContent = month ? "PL details · Month " + month : "PL details by month";
+        elements.monthResultCount.textContent = month
+          ? rows.length.toLocaleString() + (rows.length === 1 ? " PL found" : " PLs found")
+          : "";
+        elements.downloadMonth.disabled = rows.length === 0;
+        if (!rows.length) {
+          elements.monthTableHead.innerHTML = "";
+          elements.monthTableBody.innerHTML = '<tr><td class="px-4 py-8 text-center text-slate-500" colspan="' +
+            (plColumns.length || 1) + '">No PLs found for this month.</td></tr>';
+          return;
+        }
+        elements.monthTableHead.innerHTML = "<tr>" + plColumns.map(function (column) {
+          return '<th scope="col" class="whitespace-nowrap px-4 py-3">' + escapeHtml(column[0]) + "</th>";
+        }).join("") + "</tr>";
+        elements.monthTableBody.innerHTML = rows.map(function (record) {
+          return "<tr>" + plColumns.map(function (column) {
+            var key = getField(column[0], column[1]);
+            return '<td class="whitespace-nowrap px-4 py-3 text-slate-700">' +
+              escapeHtml(displayValue(getValue(record, key))) + "</td>";
+          }).join("") + "</tr>";
+        }).join("");
+      }
+
+      function renderMonthChart() {
+        var counts = countUniquePlByMonth(records);
+        var labels = Array.from({ length: 12 }, function (_, index) { return String(index + 1); });
+        var values = labels.map(function (month) { return counts[Number(month)] || 0; });
+        var colors = labels.map(function (_, index) {
+          return ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e", "#8b5cf6", "#14b8a6", "#f97316", "#64748b", "#84cc16"][index % 10];
+        });
+        var hasCounts = values.some(function (count) { return count > 0; });
+        elements.chartEmpty.classList.toggle("hidden", hasCounts);
+        elements.chartEmpty.textContent = "No PL counts are available for months 1–12.";
+        elements.monthSummary.textContent = selectedMonth
+          ? "Showing all 12 months. Month " + selectedMonth + " is selected. Click another slice to view its PLs."
+          : "Showing all 12 months. Click a slice to view its PLs.";
+        if (!chart) {
+          chart = new Chart(document.getElementById("monthChart"), {
+            type: "pie",
+            data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderColor: "#ffffff", borderWidth: 2, hoverOffset: 8 }] },
+            plugins: window.ChartDataLabels ? [ChartDataLabels] : [],
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: "bottom", labels: { usePointStyle: true, padding: 16, boxWidth: 9, color: "#475569" } },
+                tooltip: { callbacks: { label: function (context) { return " Month " + context.label + ": " + context.parsed + " PLs"; } } },
+                datalabels: {
+                  color: "#ffffff",
+                  display: function (context) { return context.dataset.data[context.dataIndex] > 0; },
+                  font: { weight: "bold", size: 12 },
+                  formatter: function (_, context) { return context.chart.data.labels[context.dataIndex]; }
+                }
+              },
+              onClick: function (event, activeElements) {
+                if (!activeElements.length) return;
+                selectedMonth = chart.data.labels[activeElements[0].index];
+                renderMonthDetails(selectedMonth);
+                elements.monthSummary.textContent =
+                  "Showing all 12 months. Month " + selectedMonth + " is selected. Click another slice to view its PLs.";
+              }
+            }
+          });
+        }
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = values;
+        chart.data.datasets[0].backgroundColor = colors;
+        chart.update();
+
+        renderMonthDetails(selectedMonth);
+      }
+
+      function downloadExcel(rows, headers, filename) {
+        if (!window.XLSX) {
+          showError("Excel export is unavailable because the spreadsheet library did not load. Check your internet connection and try again.");
+          return;
+        }
+        var worksheet = XLSX.utils.aoa_to_sheet([headers].concat(rows.map(function (row) {
+          return row.map(function (value) { return value === null || value === undefined ? "" : value; });
+        })));
+        var workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+        XLSX.writeFile(workbook, filename);
+      }
+
+      elements.plSearch.addEventListener("input", function () {
+        elements.plSearch.value = elements.plSearch.value.replace(/\D/g, "").slice(0, 8);
+        renderPlResults();
+      });
+      elements.refreshData.addEventListener("click", loadData);
+      elements.downloadMonth.addEventListener("click", function () {
+        var month = selectedMonth;
+        if (!month) return;
+        var rows = monthRows(month);
+        var keys = plColumns.map(function (column) { return getField(column[0], column[1]); });
+        downloadExcel(rows.map(function (record) {
+          return keys.map(function (key) { return getValue(record, key); });
+        }), plColumns.map(function (column) { return column[0]; }), "pl-details-" + month.replace(/[^a-z0-9_-]/gi, "_") + ".xlsx");
+      });
+
+      function loadData() {
+        elements.refreshData.disabled = true;
+        elements.refreshIcon.classList.add("animate-spin");
+        if (!appUrl || appUrl.indexOf("https://") !== 0) {
+          showError("Set appUrl near the start of the script to your deployed Apps Script web app URL.");
+          setStatus("appUrl needs configuration", "error");
+          if (!records.length) elements.plEmpty.textContent = "Sheet rows could not be loaded.";
+          elements.refreshData.disabled = false;
+          elements.refreshIcon.classList.remove("animate-spin");
+          return;
+        }
+        setStatus("Loading sheet data...", "loading");
+        fetch(appUrl)
+          .then(function (response) {
+            if (!response.ok) throw new Error("The data source returned HTTP " + response.status + ".");
+            return response.json();
+          })
+          .then(function (data) {
+            if (!Array.isArray(data)) throw new Error("Expected the Apps Script endpoint to return a JSON array of row objects.");
+            if (data.some(function (row) { return !row || typeof row !== "object" || Array.isArray(row); })) {
+              throw new Error("The endpoint response must contain only JSON objects.");
+            }
+            records = data;
+            configureFields();
+            setStatus("Connected · " + records.length.toLocaleString() + " rows", "success");
+            renderMonthChart();
+            renderPlResults();
+            clearError();
+            if (!records.length) showError("The endpoint returned no data rows. Check that the sheet has a header row and data.");
+            elements.refreshData.disabled = false;
+            elements.refreshIcon.classList.remove("animate-spin");
+          })
+          .catch(function (error) {
+            showError("Could not load sheet data: " + error.message + " Check appUrl, deployment access, and the Apps Script JSON response.");
+            setStatus("Connection failed", "error");
+            if (!records.length) elements.plEmpty.textContent = "Sheet rows could not be loaded.";
+            elements.refreshData.disabled = false;
+            elements.refreshIcon.classList.remove("animate-spin");
+          });
+      }
+
+      loadData();
+    }());
+  </script>
+</body>
+</html>
