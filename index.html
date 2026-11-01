@@ -69,7 +69,7 @@
     <section class="soft-shadow rounded-2xl border border-slate-200 bg-white p-4 sm:p-6" aria-labelledby="monthWidgetHeading">
       <div class="mb-5">
         <h2 id="monthWidgetHeading" class="text-lg font-semibold text-slate-950">Monthly PL distribution</h2>
-        <p class="mt-1 text-sm text-slate-500">The chart always shows months 1–12. Select a slice to view its PL items below.</p>
+        <p class="mt-1 text-sm text-slate-500">The chart always shows months 1–12. Select a slice to view PL items from months 1 through that month.</p>
       </div>
       <div class="relative mx-auto mb-6 h-72 max-w-xl sm:h-96">
         <canvas id="monthChart" aria-label="Clickable pie chart of PL counts by month"></canvas>
@@ -77,7 +77,7 @@
           Monthly PL counts will appear here when data loads.
         </div>
       </div>
-      <p id="monthSummary" class="mb-5 text-center text-xs text-slate-500">Pie labels show month numbers 1–12. Click a slice to view its PL rows.</p>
+      <p id="monthSummary" class="mb-5 text-center text-xs text-slate-500">Pie labels show month numbers 1–12. Click a slice to view PL rows from month 1 through the selected month.</p>
 
       <div id="monthDetails" class="hidden">
         <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -106,7 +106,7 @@
       "use strict";
 
       // Replace this value with the deployed Apps Script web app URL ending in /exec.
-      var appUrl = "https://script.google.com/macros/s/AKfycbzLq7R8hjB_9xNyxDpEu_MSFmW50RUAaLihcVuYUX4ILEvvkTtPOm0PQDxW86jkc1l2RQ/exec";
+      var appUrl = "https://script.google.com/macros/s/AKfycbyg-jLrodUm4jYtRJpuwVeanrsLWhuPEgrcLt9PbGV__98aFIdC8UsMxqzw5evdDkjx/exec";
       var records = [];
       var chart = null;
       var selectedMonth = "";
@@ -128,8 +128,9 @@
         ["stock mm pp", ["Stock MM PP"]],
         ["BAR", ["BAR"]],
         ["aac value", ["AAC Value", "AAC"]],
+        ["ITEM SECTION ", ["Item Section"]],
         ["P O details", ["PO details", "P.O. details", "Purchase Order details"]],
-        ["ledger section details", ["Ledger section details"]],
+        ["ledger section file details", ["Ledger section file details"]],
         ["Ledger section Remarks (26-27)", ["Ledger section Remarks 26-27", "Ledger section Remarks (2026-27)"]]
       ];
       var fields = { pl: "", description: "", month: "" };
@@ -267,13 +268,14 @@
         return counts;
       }
 
-      function monthRows(month) {
+      function monthRowsThrough(month) {
         var monthNumber = Number(month);
         if (!monthNumber || monthNumber < 1 || monthNumber > 12) return [];
         var rows = [];
         var seen = {};
         records.forEach(function (record) {
-          if (monthBucket(getValue(record, fields.month)) !== monthNumber) return;
+          var recordMonth = monthBucket(getValue(record, fields.month));
+          if (!recordMonth || recordMonth > monthNumber) return;
           var pl = String(getValue(record, fields.pl)).trim();
           if (!pl || seen[pl]) return;
           seen[pl] = true;
@@ -301,17 +303,17 @@
       }
 
       function renderMonthDetails(month) {
-        var rows = monthRows(month);
+        var rows = monthRowsThrough(month);
         elements.monthDetails.classList.toggle("hidden", !month);
-        elements.monthDetailHeading.textContent = month ? "PL details · Month " + month : "PL details by month";
+        elements.monthDetailHeading.textContent = month ? "PL details · Months 1–" + month : "PL details by month";
         elements.monthResultCount.textContent = month
-          ? rows.length.toLocaleString() + (rows.length === 1 ? " PL found" : " PLs found")
+          ? rows.length.toLocaleString() + (rows.length === 1 ? " PL found" : " PLs found") + " for months 1–" + month
           : "";
         elements.downloadMonth.disabled = rows.length === 0;
         if (!rows.length) {
           elements.monthTableHead.innerHTML = "";
           elements.monthTableBody.innerHTML = '<tr><td class="px-4 py-8 text-center text-slate-500" colspan="' +
-            (plColumns.length || 1) + '">No PLs found for this month.</td></tr>';
+            (plColumns.length || 1) + '">No PLs found for months 1–' + escapeHtml(month) + '.</td></tr>';
           return;
         }
         elements.monthTableHead.innerHTML = "<tr>" + plColumns.map(function (column) {
@@ -337,8 +339,8 @@
         elements.chartEmpty.classList.toggle("hidden", hasCounts);
         elements.chartEmpty.textContent = "No PL counts are available for months 1–12.";
         elements.monthSummary.textContent = selectedMonth
-          ? "Showing all 12 months. Month " + selectedMonth + " is selected. Click another slice to view its PLs."
-          : "Showing all 12 months. Click a slice to view its PLs.";
+          ? "Showing all 12 months. Month " + selectedMonth + " is selected; showing PLs from months 1–" + selectedMonth + ". Click another slice to change the range."
+          : "Showing all 12 months. Click a slice to view PLs from month 1 through that month.";
         if (!chart) {
           chart = new Chart(document.getElementById("monthChart"), {
             type: "pie",
@@ -362,7 +364,7 @@
                 selectedMonth = chart.data.labels[activeElements[0].index];
                 renderMonthDetails(selectedMonth);
                 elements.monthSummary.textContent =
-                  "Showing all 12 months. Month " + selectedMonth + " is selected. Click another slice to view its PLs.";
+                  "Showing all 12 months. Month " + selectedMonth + " is selected; showing PLs from months 1–" + selectedMonth + ". Click another slice to change the range.";
               }
             }
           });
@@ -396,11 +398,11 @@
       elements.downloadMonth.addEventListener("click", function () {
         var month = selectedMonth;
         if (!month) return;
-        var rows = monthRows(month);
+        var rows = monthRowsThrough(month);
         var keys = plColumns.map(function (column) { return getField(column[0], column[1]); });
         downloadExcel(rows.map(function (record) {
           return keys.map(function (key) { return getValue(record, key); });
-        }), plColumns.map(function (column) { return column[0]; }), "pl-details-" + month.replace(/[^a-z0-9_-]/gi, "_") + ".xlsx");
+        }), plColumns.map(function (column) { return column[0]; }), "pl-details-months-1-through-" + month.replace(/[^a-z0-9_-]/gi, "_") + ".xlsx");
       });
 
       function loadData() {
